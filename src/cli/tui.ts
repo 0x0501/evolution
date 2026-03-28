@@ -1,12 +1,11 @@
-import { createCliRenderer, Box, Text, Container } from '@opentui/core';
+import { createCliRenderer, Box, Text } from '@opentui/core';
 import { EventEmitter } from 'events';
 
 export class EvolutionTUI extends EventEmitter {
   private renderer: any;
-  private container: any;
   private statusBar: any;
-  private mainContent: Box;
-  private inputArea: Box;
+  private mainContent: any;
+  private inputArea: any;
   private agentSwitcherOpen = false;
   private currentState: any = {};
 
@@ -17,36 +16,28 @@ export class EvolutionTUI extends EventEmitter {
   async init() {
     this.renderer = await createCliRenderer();
 
-    this.statusBar = new Box({
+    this.statusBar = Box({
       flexDirection: 'row',
       height: 1,
       backgroundColor: '#333',
-      padding: 0,
     });
 
-    this.mainContent = new Box({
+    this.mainContent = Box({
       flexGrow: 1,
       flexDirection: 'column',
       padding: 1,
     });
 
-    this.inputArea = new Box({
+    this.inputArea = Box({
       flexDirection: 'row',
       height: 3,
-      borderTop: 1,
+      border: true,
       padding: 1,
-    });
+    } as any);
 
-    this.container = new Container({
-      width: '100%',
-      height: '100%',
-    });
-
-    this.container.add(this.statusBar);
-    this.container.add(this.mainContent);
-    this.container.add(this.inputArea);
-
-    this.renderer.root.add(this.container);
+    this.renderer.root.add(this.statusBar);
+    this.renderer.root.add(this.mainContent);
+    this.renderer.root.add(this.inputArea);
     this.setupKeyboardHandlers();
     this.renderStatusBar();
   }
@@ -66,8 +57,8 @@ export class EvolutionTUI extends EventEmitter {
   }
 
   private renderStatusBar() {
-    this.statusBar.clear();
     const status = this.getCurrentStatus();
+    this.statusBar.clear();
     this.statusBar.add(
       Text({ content: status })
     );
@@ -91,7 +82,6 @@ export class EvolutionTUI extends EventEmitter {
   async streamOutput(agentName: string, content: string) {
     const agentLabel = Text({
       content: `[${agentName}] `,
-      color: '#0af',
     });
     const contentText = Text({ content });
     this.mainContent.add(agentLabel);

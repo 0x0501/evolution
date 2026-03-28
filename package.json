@@ -14,6 +14,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@langchain/core": "^0.3.0",
     "@langchain/langgraph": "^0.2.0",
+    "@langchain/openai": "^0.3.17",
     "@opentui/core": "^0.1.69",
     "deepagents": "^1.8.6",
     "dotenv": "^16.4.0",

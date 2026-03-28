@@ -1,10 +1,10 @@
-import { GraphNode, Command } from '@langchain/langgraph';
-import type { EvolutionState } from './state.js';
+import { Command } from '@langchain/langgraph';
+import type { EvolutionStateType } from './state.js';
 import { createAgent } from '../agents/deepagent.js';
 import { createBranch, commit, mergeToMain, createTag, generateVersion } from '../services/git.js';
 import { appendToAgentsMd, writeIdeasMd, readAgentsMd } from '../services/persistence.js';
 
-export const orchestratorNode: GraphNode<EvolutionState> = async (state) => {
+export async function orchestratorNode(state: EvolutionStateType) {
   const agent = createAgent('orchestrator');
   const branchName = `iter-${state.iteration}-${state.stage}`;
 
@@ -26,9 +26,9 @@ export const orchestratorNode: GraphNode<EvolutionState> = async (state) => {
       executionState: 'RUNNING' as const,
     },
   });
-};
+}
 
-export const validationNode: GraphNode<EvolutionState> = async (state) => {
+export async function validationNode(state: EvolutionStateType) {
   const agent = createAgent('validationOrchestrator');
 
   const result = await agent.invoke({
@@ -53,9 +53,9 @@ export const validationNode: GraphNode<EvolutionState> = async (state) => {
       },
     });
   }
-};
+}
 
-export const brainstormNode: GraphNode<EvolutionState> = async (state) => {
+export async function brainstormNode(state: EvolutionStateType) {
   const agent = createAgent('brainstormer');
   const agentsMd = await readAgentsMd();
 
@@ -69,13 +69,13 @@ export const brainstormNode: GraphNode<EvolutionState> = async (state) => {
       stage: 'guardrail' as const,
     },
   });
-};
+}
 
-export const guardrailNode: GraphNode<EvolutionState> = async (state) => {
+export async function guardrailNode(state: EvolutionStateType) {
   const agent = createAgent('guardrail');
 
   const result = await agent.invoke({
-    messages: [{ role: 'user', content: state.brainstormOutput }],
+    messages: [{ role: 'user', content: state.brainstormOutput || '' }],
   });
 
   const guardrailResult = parseGuardrailResult(result);
@@ -103,7 +103,7 @@ export const guardrailNode: GraphNode<EvolutionState> = async (state) => {
       },
     });
   }
-};
+}
 
 function extractTaskList(result: any): string[] {
   const content = result.messages?.[result.messages.length - 1]?.content || '';

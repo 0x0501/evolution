@@ -1,12 +1,12 @@
 import { MemorySaver, StateGraph } from '@langchain/langgraph';
-import { EvolutionStateSchema } from './state.js';
+import { EvolutionState } from './state.js';
 import { orchestratorNode, validationNode, brainstormNode, guardrailNode } from './nodes.js';
 import { shouldContinue } from './edges.js';
 
 const memory = new MemorySaver();
 
 export function compileGraph() {
-  const workflow = new StateGraph(EvolutionStateSchema)
+  const workflow = new StateGraph(EvolutionState)
     .addNode('orchestrator', orchestratorNode)
     .addNode('validation', validationNode)
     .addNode('brainstorm', brainstormNode)

@@ -5,10 +5,13 @@ import { agentConfigs } from '../config/agents.js';
 import { agentSkillsConfig } from '../config/agent-skills.js';
 import { resolve } from 'path';
 
-const model = new ChatOpenAI({
+// Configure ChatOpenAI with custom base URL
+const model: any = new ChatOpenAI({
   apiKey: config.openai.apiKey,
   model: config.openai.model,
-  baseUrl: config.openai.baseUrl,
+  configuration: {
+    baseURL: config.openai.baseUrl,
+  },
   streaming: true,
 });
 
@@ -33,7 +36,7 @@ export function createAgent(agentName: string) {
     model,
     systemPrompt: agentConfig.systemPrompt,
     backend,
-    middlewares: [skillsMiddleware],
+    middleware: [skillsMiddleware],
     subagents: [],
   });
 }

@@ -7,7 +7,7 @@ export function renderStatusBar(
   stage: LoopStage,
   executionState: ExecutionState,
   sudoMode: boolean
-): Box {
+): any {
   const stageLabels: Record<LoopStage, string> = {
     orchestrator: '任务编排',
     validation: '验证编排',
@@ -31,11 +31,10 @@ export function renderStatusBar(
     'Ctrl+T切换Agent',
   ].join(' │ ');
 
-  return new Box({
+  return Box({
     flexDirection: 'row',
     width: '100%',
     height: 1,
     backgroundColor: '#222',
-    padding: 0,
-  }, Text({ content: statusText, color: '#fff' }));
+  }, Text({ content: statusText }));
 }

@@ -1,7 +1,6 @@
-import { StateSchema, StateSchemaType } from '@langchain/langgraph';
 import { z } from 'zod';
 
-export const EvolutionStateSchema = new StateSchema('Evolution', {
+export const EvolutionState = z.object({
   iteration: z.number().default(1),
   maxIterations: z.number().default(10),
   stage: z.enum(['orchestrator', 'validation', 'brainstorm', 'guardrail']).default('orchestrator'),
@@ -26,4 +25,4 @@ export const EvolutionStateSchema = new StateSchema('Evolution', {
   artifacts: z.record(z.string()).default({}),
 });
 
-export type EvolutionState = StateSchemaType<typeof EvolutionStateSchema>;
+export type EvolutionStateType = z.infer<typeof EvolutionState>;

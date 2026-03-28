@@ -1,7 +1,7 @@
-import { END, RouteArgs } from '@langchain/langgraph';
-import type { EvolutionState } from './state.js';
+import { END } from '@langchain/langgraph';
+import type { EvolutionStateType } from './state.js';
 
-export function shouldContinue(state: EvolutionState): RouteArgs<EvolutionState> {
+export function shouldContinue(state: EvolutionStateType): string {
   if (state.executionState === 'ABORTED') return END;
   if (state.iteration > state.maxIterations) return END;
   if (state.stage === 'orchestrator' && state.executionState === 'COMPLETED') return END;

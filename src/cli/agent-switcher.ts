@@ -15,22 +15,21 @@ const AGENTS = [
 export function renderAgentSwitcher(
   selectedIndex: number,
   onSelect: (id: string) => void
-): Box {
+): any {
   const items = AGENTS.map((agent, index) => {
     const prefix = index === selectedIndex ? '▶ ' : '  ';
     return Text({
       content: `${prefix}${agent.emoji} ${agent.name}`,
-      color: index === selectedIndex ? '#0f0' : '#888',
     });
   });
 
-  return new Box({
-    position: { x: 0, y: 2 },
+  return Box({
+    position: 'absolute',
     width: 30,
     height: items.length + 2,
     backgroundColor: '#1a1a1a',
-    border: 1,
+    border: true,
     flexDirection: 'column',
     padding: 1,
-  }, ...items);
+  } as any, ...items);
 }

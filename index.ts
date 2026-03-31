@@ -1,5 +1,9 @@
 import type { ModelProfile } from "@langchain/core/language_models/profile";
-import { SystemMessage } from "@langchain/core/messages";
+import {
+	AIMessageChunk,
+	SystemMessage,
+	ToolMessage,
+} from "@langchain/core/messages";
 import {
 	type GraphNode,
 	MemorySaver,
@@ -7,17 +11,23 @@ import {
 	ReducedValue,
 	StateSchema,
 } from "@langchain/langgraph";
-import { exec } from "child_process";
-import { createDeepAgent, FilesystemBackend, LocalShellBackend } from "deepagents";
+import {
+	createDeepAgent,
+	type FilesystemBackend,
+	LocalShellBackend,
+} from "deepagents";
 import * as fs from "fs";
-import { createAgent, initChatModel, tool } from "langchain";
+import { createAgent, initChatModel } from "langchain";
 import path from "path";
-import { promisify } from "util";
 import { z } from "zod";
-
-const execAsync = promisify(exec);
-const writeFileAsync = promisify(fs.writeFile);
-const mkdirAsync = promisify(fs.mkdir);
+import { ModelPathInterceptorMiddleware } from "./middleware";
+import {
+	checkScaffoldProjectIntegrity,
+	cleanPath,
+	createViteReactTailwindCProject,
+	getCurrentDate,
+	initializeTestEnvironment,
+} from "./tools";
 
 console.log("Hello via Bun!");
 
@@ -33,166 +43,6 @@ const model = await initChatModel("minimax-m2.7", {
 	profile: customProfile,
 });
 
-const initializeTestEnvironment = tool(
-	async () => {
-		// 1. Always use the absolute path within your intended workspace
-		const workspaceRoot = path.join(process.cwd(), "workspace");
-		const projectPath = path.join(workspaceRoot, "artifacts");
-
-		try {
-			// 1. 检查防呆逻辑：确保前端项目已经存在，否则无处安装测试环境
-			if (!fs.existsSync(projectPath)) {
-				throw new Error(
-					`Project directory ${projectPath} does not exist. Please scaffold the frontend project first.`,
-				);
-			}
-
-			console.log(
-				`🚀 Installing test environment in: ${projectPath} (vitest + playwright + @testing-library/react)`,
-			);
-
-			// 2. 定义统一的执行环境：所有命令都必须在已存在的 artifacts 目录下执行
-			const execOptions = {
-				cwd: projectPath, // 👈 关键修复：直接进入项目内部执行
-				stdio: "inherit" as const,
-				env: process.env, // 继承环境变量
-			};
-
-			// 3. 安装并初始化 Playwright
-			// 使用 "." 代表在当前目录（即 projectPath）初始化，它会自动合并 package.json 而不是覆盖整个文件夹
-			await execAsync(
-				`bun create playwright . --quiet --lang TypeScript`,
-				execOptions,
-			);
-
-			// 4. 安装 Vitest 和 React 测试生态
-			// 补充了 jsdom，因为测试 React 组件通常需要模拟浏览器 DOM 环境
-			await execAsync(
-				`bun add -D vitest @testing-library/react jsdom`,
-				execOptions,
-			);
-
-			console.log("Success: initialized test environment.");
-			// return `Success: initialized test environment.`
-		} catch (error) {
-			console.error(
-				`Error (initialize_test_environment): ${error instanceof Error ? error.message : String(error)}`,
-			);
-			// return `Error (initialize_test_environment): ${error instanceof Error ? error.message : String(error)}`
-		}
-	},
-	{
-		name: "initialize_test_environment",
-		description:
-			"Initializes test environment for the project (vitest + playwright).",
-	},
-);
-
-const createViteReactTailwindCProject = tool(
-	async () => {
-		// 1. Always use the absolute path within your intended workspace
-		const workspaceRoot = path.join(process.cwd(), "workspace");
-		const projectPath = path.join(workspaceRoot, "artifacts");
-
-		try {
-			// 1. Ensure the workspace directory exists on the REAL file system
-			if (!fs.existsSync(workspaceRoot)) {
-				fs.mkdirSync(workspaceRoot, { recursive: true });
-			}
-
-			// 2. Clean up any broken state from previous runs
-			if (fs.existsSync(projectPath)) {
-				fs.rmSync(projectPath, { recursive: true, force: true });
-			}
-
-			console.log(`🚀 Scaffolding project in: ${projectPath}`);
-
-			// 3. Create the project
-			// Note: We use the standard 'react-ts' template.
-			// We execute this in 'workspaceRoot' so it creates the 'artifacts' folder.
-			await execAsync(
-				`bun create vite artifacts --template react-ts --no-interactive`,
-				{
-					cwd: workspaceRoot,
-					env: process.env, // 👈 CRITICAL: Inherit PATH so Node can find '/bin/sh' and 'bun'
-				},
-			);
-
-			// 4. The Guardian Check: Ensure the directory actually exists before moving on
-			if (!fs.existsSync(projectPath)) {
-				console.log`Error: Vite failed to scaffold the directory at ${projectPath}.`;
-				return `Error: Vite failed to scaffold the directory at ${projectPath}.`;
-			}
-
-			console.log("Installing dependencies and Tailwind CSS v4...");
-
-			// 5. Run subsequent commands
-			const execOptions = {
-				cwd: projectPath, // We now know 100% this folder exists
-				stdio: "inherit" as const,
-				env: process.env, // 👈 CRITICAL: Keep environment variables intact
-			};
-
-			await execAsync(`bun install`, execOptions);
-			await execAsync(`bun add -D tailwindcss @tailwindcss/vite`, execOptions);
-
-			await mkdirAsync(path.join(projectPath, "src", "tests"), {
-				recursive: true,
-			});
-
-			// install playwright
-			// await execAsync(`bun add -D playwright`, execOptions);
-
-			// 6. Write the Vite config
-			const viteConfigContent = `
-        import { defineConfig } from 'vite'
-        import react from '@vitejs/plugin-react'
-        import tailwindcss from '@tailwindcss/vite'
-        
-        // https://vite.dev/config/
-        export default defineConfig({
-          plugins: [
-            react(),
-            tailwindcss()
-          ],
-        })`.trim();
-
-			await writeFileAsync(
-				path.join(projectPath, "vite.config.ts"),
-				viteConfigContent,
-			);
-
-			// 7. Configure Tailwind CSS
-			const tailwindImport = `@import "tailwindcss";\n`;
-			const cssFilePath = path.join(projectPath, "src", "index.css");
-
-			if (fs.existsSync(cssFilePath)) {
-				const existingContent = fs.readFileSync(cssFilePath, "utf-8");
-				await writeFileAsync(cssFilePath, tailwindImport + existingContent);
-			} else {
-				fs.mkdirSync(path.dirname(cssFilePath), { recursive: true });
-				await writeFileAsync(cssFilePath, tailwindImport);
-			}
-
-			console.log("Success: initialized with Tailwind v4 at the top of CSS.");
-
-			return `Success: initialized with Tailwind v4 at the top of CSS.`;
-		} catch (error) {
-			console.error(
-				`Error (scaffold_frontend_project): ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return `Error (scaffold_frontend_project): ${error instanceof Error ? error.message : String(error)}`;
-		}
-	},
-	{
-		name: "scaffold_frontend_project",
-		description:
-			"Scaffolds a new Vite + React + Tailwind CSS project in the current directory. Uses Tailwind v4 (plugin-based) for the most modern setup.",
-		// schema: z.object({
-		// 	projectName: z.string().nonempty().describe("The Project name."),
-		// }),
-	},
-);
 // create filesystem at project directory
 const backend = new LocalShellBackend({
 	rootDir: path.join(process.cwd(), "workspace"),
@@ -290,13 +140,9 @@ const ValidationOrchestrator = createDeepAgent({
 	systemPrompt: `You are the "Quality Czar." You do not test code yourself but direct Playwright and Multimodal Vision agents to verify the artifact. (Only run this agent after Web Developer agent is finished.)
 
     1. Evaluation: Analyze the test logs and UI screenshots. You must call all of the subagents to complete the tasks.
-
     2. Feedback Loop: If any UI misalignment or functional bug exists, generate a "Refinement Report" and trigger a REJECT signal to the Task Orchestrator.
-
     3. Approval: Only move to the Brainstorming phase if all critical paths (E2E) and visual checks pass.
-
     4. Use 'write_todos' tools to write plans and save it to '/spec/validation-orchestrator-plan.md' and update it when status of tasks are updated.
-
     5. When validation ends, write validation report at '/spec/validation-report.md'
 
 	6. You must use 'initialize_test_environment' tool to initialize test environment before assign tasks to subagents.
@@ -320,44 +166,13 @@ const ValidationOrchestrator = createDeepAgent({
 		".claude/skills/project-rule",
 		".claude/skills/typescript-advanced-types",
 	],
-	tools: [initializeTestEnvironment],
+	tools: [initializeTestEnvironment, cleanPath],
 
 	// check pointer is required when use memory and skills
 	// For more: https://docs.langchain.com/oss/javascript/langgraph/persistence#checkpointer-libraries
 	// The simplest way is MemorySaver
 	checkpointer,
-	middleware: [
-		// todoListMiddleware(),
-		// createSubAgentMiddleware({
-		//     defaultModel: model,
-		// }),
-		// summarizationMiddleware({
-		//     model,
-		//     trigger: {
-		//         fraction: 0.6,
-		//     },
-		//     keep: {
-		//         messages: 20,
-		//     },
-		// }),
-		// createMemoryMiddleware({
-		//     backend: new FilesystemBackend({ rootDir: "/" }),
-		//     sources: [
-		//         "./AGENTS.md",
-		//         "~/.deepagents/AGENTS.md",
-		//         "./.deepagents/AGENTS.md",
-		//     ],
-		// }),
-		// createFilesystemMiddleware({
-		//     backend: (config) =>
-		//         new CompositeBackend(new StateBackend(config), {
-		//             "/memories/": new StoreBackend(config),
-		//         }),
-		//     systemPrompt:
-		//         "Write to filesystem when user request you build something.",
-		// }),
-		// createPatchToolCallsMiddleware(),
-	],
+	middleware: [ModelPathInterceptorMiddleware()],
 	// simple dictionary agents
 	subagents: [
 		{
@@ -366,6 +181,8 @@ const ValidationOrchestrator = createDeepAgent({
 
             ## Objectives
             Your task is to take prototype code provided by the "Frontend Developer Agent" and write high-quality, executable Vitest test suites for it.
+
+			CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
             ## Skill Set & Rules
             1. **Vitest Mastery:** You are highly proficient with core APIs including 'describe', 'it/test', 'expect', 'beforeEach', and 'afterEach'.
@@ -407,10 +224,14 @@ const ValidationOrchestrator = createDeepAgent({
 				".claude/skills/typescript-advanced-types",
 				// ".claude/skills/lsp-code-analysis",
 			],
+			tools: [cleanPath],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "Playwright E2E Test",
 			systemPrompt: `You are a QA Automation Engineer. Based on the PM's Acceptance Criteria, write and execute Playwright scripts.
+
+			CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
             ## Core Objectives
             1.  **Requirement Analysis:** Analyze PM Acceptance Criteria to identify all functional requirements.
@@ -438,11 +259,15 @@ const ValidationOrchestrator = createDeepAgent({
 				".claude/skills/typescript-advanced-types",
 				// ".claude/skills/lsp-code-analysis",
 			],
+			tools: [cleanPath],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "Multimodal Vision Test",
 			systemPrompt: `
                 You are a specialized QA Engineer capable of both technical execution and aesthetic analysis. You use Playwright to "see" the application in its live state and multimodal vision capabilities to audit the UI/UX against professional design standards and accessibility guidelines.
+
+				CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
                 ## Core Objectives
                 1. **Capture:** Execute Playwright commands (via playwright-cli skill) to navigate the app and capture high-resolution screenshots of specific components or full pages.
@@ -493,6 +318,8 @@ const ValidationOrchestrator = createDeepAgent({
 				".claude/skills/project-rule",
 				// ".claude/skills/lsp-code-analysis",
 			],
+			tools: [cleanPath],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 	],
 });
@@ -501,15 +328,12 @@ const TaskOrchestrator = createDeepAgent({
 	name: "Task Orchestrator",
 	systemPrompt: `You are the "Evolution Architect." Your goal is to decompose a product vision into actionable technical tasks.
 
-    1. Context Awareness: Always read AGENTS.md and IDEAS.md before planning (if not exist, create them).
+    1. Context Awareness: Always read AGENTS.md and IDEAS.md before planning (if not exist, create them). You MUST read/create AGENTS.md and IDEAS.md files at the root of the project. (/AGENTS.md and /IDEAS.md, NOT /spec/AGENTS.md and /spec/IDEAS.md)
+    2. Task Decomposition: Break the requirement into sub-tasks for PM, System Architect, UI/UX Designer, Web Developer, Quality Czar and validator (Only Call this agent after Web Developer agent is finished) and Release Manager and Summarizer. And you must use 'write_todos' tools to write plans and save it to '/spec/task-orchestrator-plan.md' and update it when status of tasks are updated.
+    3. Branching: Create a descriptive git branch (e.g., 003-feat-auth-logic) corresponding to the current iteration, name convention: [3-digit-number]-[short-feature-description].
 
-    2. Task Decomposition: Break the requirement into sub-tasks for PM, System Architect, UI/UX Designer, Web Developer and Quality Czar and validator (Only Call this agent after Web Developer agent is finished). And you must use 'write_todos' tools to write plans and save it to '/spec/task-orchestrator-plan.md' and update it when status of tasks are updated.
+	CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
-    4. Branching: Create a descriptive git branch (e.g., 003-feat-auth-logic) corresponding to the current iteration, name convention: [3-digit-number]-[short-feature-description].
-
-    5. All the artifacts stored at '/artifacts/' folder (Put the code directly in the folder, DO NOT create subfolders for example: /artifacts/shop-mall/...).
-
-    
     ## Workflow
 
     The sub-agents must follow the following workflow:
@@ -518,6 +342,7 @@ const TaskOrchestrator = createDeepAgent({
     3. UI/UX Designer agent
     4. Web Developer agent
     5. Quality Czar and validator agent
+	6. Release Manager and Summarizer (Only Call this agent after all the tasks are completed)
     
     IMPORTANT: delegate tasks to your subagents using the task() tool. This keeps your context clean and improves results. And you must call all of the subagents to complete the tasks.
     `,
@@ -525,7 +350,7 @@ const TaskOrchestrator = createDeepAgent({
 	backend,
 	// Read AGENTS.md file as memories (provide extra context to your deep agent.)
 	memory: ["./AGENTS.md", "~/.deepagents/AGENTS.md", "./.deepagents/AGENTS.md"],
-	// tools: [guessName],
+	tools: [cleanPath],
 	// skills: ["~/.claude/skills/"],
 	skills: [".claude/skills/project-rule"],
 	// check pointer is required when use memory and skills
@@ -533,6 +358,7 @@ const TaskOrchestrator = createDeepAgent({
 	// The simplest way is MemorySaver
 	checkpointer,
 	middleware: [
+		ModelPathInterceptorMiddleware(),
 		// todoListMiddleware(),
 		// createSubAgentMiddleware({
 		//     defaultModel: model,
@@ -572,17 +398,24 @@ const TaskOrchestrator = createDeepAgent({
         
         1. Your goal is to move the product from 'functional' to 'delightful'. 
         2. You must output structured design tokens (Colors, Spacing, Shadows) and layout instructions that the Frontend Engineer can easily implement using Tailwind CSS
-        3. You must use 'edit_file' tool to update Design tokens and layout instructions in AGENTS.md file
+        3. You must use 'edit_file' tool to update Design tokens and layout instructions in AGENTS.md file.
+
+		CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
+
         `,
 			description:
 				"Call this agent when the project requires visual styling, layout definitions, color schemes, or interactive component design (design tokens) before the coding phase begins.",
 			model, // default to main agent
 			skills: [".claude/skills/frontend-design", ".claude/skills/project-rule"],
+			tools: [cleanPath],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "system-architect",
 			systemPrompt: `
             You are a visionary Lead System Architect with expertise in Clean Architecture, Design Patterns, and Frontend Infrastructure. Your primary responsibility is to ensure that business requirements (from the PM) are translated into a flawless, scalable, and testable technical blueprint. You provide the "Source of Truth" that prevents "hallucination" or misalignment in subsequent agents (Developer, Vitest, Playwright, and Visual Auditor).
+
+			Important: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
             ## 2. Architectural Pillars
             - **Predictability:** Every component and function must have a clearly defined interface.
@@ -606,7 +439,8 @@ const TaskOrchestrator = createDeepAgent({
             4.  **Mock Strategy:** Define the JSON schema for any mock data needed by the Frontend Developer or Vitest Engineer.
             5.  **Synchronization:** Update '/spec/architecture-spec.md' with the finalized plan.
             6.  All the data stored at local (Localstorage, Sessionstorage, IndexedDB, etc.).
-            7.  You must indicate Web Developer agent to use 'scaffold_frontend_project' tool to scaffold a new Vite + React + Tailwind CSS project before any coding.
+
+            CRITICAL: You MUST indicate Web Developer agent to use 'scaffold_frontend_project' tool to scaffold a new Vite + React + Tailwind CSS project before any coding.
 
             ## 5. Required Output Structure
             Every time you provide a technical blueprint, use the following Markdown sections:
@@ -648,6 +482,8 @@ const TaskOrchestrator = createDeepAgent({
 				".claude/skills/project-rule",
 				".claude/skills/typescript-advanced-types",
 			],
+			tools: [cleanPath],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "web-developer",
@@ -655,14 +491,17 @@ const TaskOrchestrator = createDeepAgent({
         
         1. Stack: React + TypeScript + Vite + Tailwind CSS.
         2. Constraint: Write modular, clean code. Ensure every component is responsive.
-        3. You must use 'scaffold_frontend_project' tool to scaffold a new Vite + React + Tailwind CSS project before any coding.
+        3. You **MUST USE** 'scaffold_frontend_project' tool to scaffold a new Vite + React + Tailwind CSS project before any coding. **DO NOT** create files manually.
         4. You must use 'write_todos' to write plans and save it to '/spec/web-frontend-developer-plan.md' and update it when status of tasks are updated.
+		5. After use 'scaffold_frontend_project' you should use 'check_scaffold_project_integrity' tool to check if the project is scaffolded successfully and correctly.
 
         ## Project Structure Rules (CRITICAL)
 
         Root Directory: The absolute root of the frontend project is /artifacts/.
 
-        No Subfolders: You MUST NOT create or look for a project-named subfolder (e.g., /artifacts/my-app/).
+        No Subfolders: You **MUST NOT** create or look for a project-named subfolder (e.g., /artifacts/my-app/).
+
+		CRITICAL: YOU **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
 
         ## File Locations
 
@@ -672,7 +511,10 @@ const TaskOrchestrator = createDeepAgent({
 
         Tool Usage: When using filesystem tools, always prefix paths with /artifacts/ followed immediately by the filename (e.g., /artifacts/src/App.tsx)
         
-        You must update the project structure and fulfill the tasks assigned by the Orchestrator. Use the typescript-lsp skill to ensure zero type errors.`,
+        You must update the project structure and fulfill the tasks assigned by the Orchestrator. Use the typescript-lsp skill to ensure zero type errors.
+
+		CRITICAL: Only call this agent AFTER the PM, System Architect, UI/UX Designer have confirmed their work has been completed.
+		`,
 			description:
 				"Call this agent to implement the UI and logic using React, TypeScript, and Vite. Use this for writing .tsx files, configuring Tailwind CSS, and ensuring the application is runnable.",
 			model, // default to main agent
@@ -682,22 +524,66 @@ const TaskOrchestrator = createDeepAgent({
 				".claude/skills/typescript-advanced-types",
 				// ".claude/skills/lsp-code-analysis",
 			],
-			tools: [createViteReactTailwindCProject],
+			tools: [
+				createViteReactTailwindCProject,
+				checkScaffoldProjectIntegrity,
+				cleanPath,
+			],
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "product-manager (PM)",
 			description: "Used when need to design a new product",
 			skills: [".claude/skills/project-rule"],
+			tools: [cleanPath],
 			systemPrompt: `You are an Expert PM. Refine raw ideas into detailed User Stories and Acceptance Criteria (AC).
         
         1. Focus on product-market fit and logical consistency with the "Background Story."
-        2. use 'edit_file' tool to update Background story chapter in AGENTS.md file if background story doesn't exist or empty in AGENTS.md
+        2. You MUST use 'edit_file' tool to update Background story chapter in 'AGENTS.md' file if background story doesn't exist or empty in 'AGENTS.md'.
+
+		CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
         `,
+			middleware: [ModelPathInterceptorMiddleware()],
 		},
 		{
 			name: "Quality Czar and validator",
-			description: `Only Call this agent after Web dev agent is finished. It used to aggregate all testing results (logs and screenshots), evaluate if the current prototype meets the "60-90 score" criteria, and decide whether to approve the build or trigger a re-work loop.`,
+			description: `It used to aggregate all testing results (logs and screenshots), evaluate if the current prototype meets the "60-90 score" criteria, and decide whether to approve the build or trigger a re-work loop. CRITICAL: Only call this agent AFTER the web-developer has confirmed project scaffolding and code implementation is 100% complete`,
 			runnable: ValidationOrchestrator,
+			tools: [cleanPath],
+		},
+		{
+			name: "Release Manager and Summarizer",
+			description:
+				"MUST be called at the very end of the workflow (after Quality Czar). Used to summarize the user's request, aggregate all changes made during the iteration, and append the changelog to AGENTS.md.",
+			model, // default to main agent
+			skills: [".claude/skills/project-rule"],
+			tools: [getCurrentDate, cleanPath], // 👈 注入刚刚定义的日期工具
+			middleware: [ModelPathInterceptorMiddleware()],
+			systemPrompt: `You are the Final Summarizer and Release Manager. Your job is to run at the absolute end of an iteration to document what has been built.
+
+            ## Workflow
+            1. Analyze the initial user request and the work completed by the PM, Architect, UI/UX Designer, Web Developer, and Quality Czar.
+			3. Read the 'IDEAS.md' file to get the current round of ideas of the product.
+            3. Call the 'get_current_date' tool to get today's date.
+            4. Use the 'edit_file' tool to append a new iteration log to the 'AGENTS.md' file under the '## 更新记录' section. DO NOT overwrite existing logs.
+
+			CRITICAL: You **MUST USE** 'project-rule' skills to enforce the project structure, and follow the rules.
+
+            ## Output Format Requirement
+            You MUST strictly follow this Markdown structure when appending to the file. Use the branch name or task ID for the heading:
+
+            ### [3-digit-number]-[short-feature-description]
+            > 更新日期：YYYY-MM-DD
+
+            - **需求总结**: (1-2 sentences summarizing what the user asked for)
+            - **核心更改**:
+              - (Bullet point 1 of what was implemented/changed)
+              - (Bullet point 2)
+              - ...
+            - **测试结果**: (Briefly state the validation verdict from the Quality Czar)
+            
+            Ensure the entry is clean, concise, and accurately reflects the entire iteration cycle.
+            `,
 		},
 	],
 });
@@ -720,16 +606,43 @@ const TaskOrchestrator = createDeepAgent({
 
 // Skip internal middleware steps - only show meaningful node names
 const INTERESTING_NODES = new Set(["model_request", "tools"]);
+const LOG_DIR = path.join(process.cwd(), "logs");
 
 let lastSource = "";
 let midLine = false; // true when we've written tokens without a trailing newline
+
+const getTimestamp = () => {
+	const now = new Date();
+	const time = now.toLocaleTimeString("zh-CN", {
+		hour12: false,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+	}); // HH:mm:ss
+	const ms = now.getMilliseconds().toString().padStart(3, "0"); // 补齐毫秒
+	return `[${time}.${ms}]`;
+};
+
+const writeLog = (data: string) => {
+	if (!fs.existsSync(LOG_DIR)) {
+		fs.mkdirSync(LOG_DIR, { recursive: true });
+	}
+	fs.appendFileSync(path.join(LOG_DIR, "log.txt"), data, {
+		encoding: "utf-8",
+		flag: "a",
+	});
+};
 
 for await (const [namespace, mode, data] of await TaskOrchestrator.stream(
 	{
 		messages: [
 			{
 				role: "human",
-				content: "continue the previous task",
+				content: "create a todo list web app",
+				// content: "continue the previous task",
 				// content: "list all the available skills",
 			},
 		],
@@ -742,15 +655,42 @@ for await (const [namespace, mode, data] of await TaskOrchestrator.stream(
 )) {
 	const isSubagent = namespace.some((s: string) => s.startsWith("tools:"));
 	const source = isSubagent ? "subagent" : "main";
+	const ts = getTimestamp();
+	const [message] = mode;
+
+	// Tool call chunks (streaming tool invocations)
+	if (AIMessageChunk.isInstance(message) && message.tool_call_chunks?.length) {
+		for (const tc of message.tool_call_chunks) {
+			if (tc.name) {
+				console.log(`\n[${source}] Tool call: ${tc.name}`);
+			}
+			// Args stream in chunks - write them incrementally
+			if (tc.args) {
+				process.stdout.write(tc.args);
+			}
+		}
+	}
+
+	// Tool results
+	if (ToolMessage.isInstance(message)) {
+		console.log(
+			`\n[${source}] Tool result [${message.name}]: ${message.text?.slice(0, 150)}`,
+		);
+		writeLog(
+			`\n[${source}] Tool result [${message.name}]: ${message.text?.slice(0, 150)}`,
+		);
+	}
 
 	if (mode === "updates") {
 		for (const nodeName of Object.keys(data)) {
 			if (!INTERESTING_NODES.has(nodeName)) continue;
 			if (midLine) {
 				process.stdout.write("\n");
+				writeLog("\n");
 				midLine = false;
 			}
-			console.log(`[${source}] step: ${nodeName}`);
+			console.log(`${ts} [${source}] step: ${nodeName}`);
+			writeLog(`${ts} [${source}] step: ${nodeName}\n`);
 		}
 	} else if (mode === "messages") {
 		const [message] = data;
@@ -759,20 +699,26 @@ for await (const [namespace, mode, data] of await TaskOrchestrator.stream(
 			if (source !== lastSource) {
 				if (midLine) {
 					process.stdout.write("\n");
+					writeLog("\n");
 					midLine = false;
 				}
 				process.stdout.write(`\n[${source}] `);
+				writeLog(`\n[${source}]`);
+
 				lastSource = source;
 			}
 			process.stdout.write(message.text);
+			writeLog(message.text);
 			midLine = true;
 		}
 	} else if (mode === "custom") {
 		if (midLine) {
 			process.stdout.write("\n");
+			writeLog("\n");
 			midLine = false;
 		}
-		console.log(`[${source}] custom event:`, data);
+		console.log(`${ts} [${source}] custom event:`, data);
+		writeLog(`${ts} [${source}] custom event: ${data}`);
 	}
 }
 

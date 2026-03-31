@@ -14,6 +14,7 @@ description: Use this skill to enforce the authoritative project structure and a
 
 | Rule | Value |
 | :--- | :--- |
+| **Workspace** | `/` |
 | **Project root** | `/artifacts/` |
 | **Subfolders inside `/artifacts/`** | **FORBIDDEN** |
 
@@ -30,13 +31,16 @@ The scaffolding tool places all frontend source code **directly** under `/artifa
 |/artifacts/index.html |  /artifacts/todo/index.html
 
 
-**Never** create or read a path of the form `/artifacts/<project-name>/…`.
+**Never** create or read a path of the form `/artifacts/<project-name>/…`. You MUST use `clean_path` tool to sanitize raw path and get the correct one.
 
 ---
 
 ## 2. Canonical Directory Layout
-
+/artifacts/tests/e2e/ 
+/artifacts/screenshots/ ← visual audit screenshots
 ```
+/AGENTS.md ← containing the detailed context and agent's memory for the specific project, NOT the 'evolution' project itself.
+/IDEAS.md  ← the current round of ideas made by brainstorm agent or human.
 /artifacts/ ← project root (Vite output / package.json live here)
 ├── README.md
 ├── bun.lock
@@ -46,6 +50,9 @@ The scaffolding tool places all frontend source code **directly** under `/artifa
 ├── public
 │   ├── favicon.svg
 │   └── icons.svg
+├── tests
+│   ├── e2e/ ← Playwright test files only
+├── screenshots/ ← visual audit screenshots made by 'Multimodal Vision Test' agent
 ├── src
 │   ├── App.css
 │   ├── App.tsx
@@ -64,11 +71,9 @@ The scaffolding tool places all frontend source code **directly** under `/artifa
 ├── tsconfig.json
 ├── tsconfig.node.json
 └── vite.config.ts
-```
-
-```
 /spec/ ← all architecture docs, test plans, reports
-├── architecture-spec.md
+├── ARCHITECTURE.md
+├── UI-UX-DESIGN.md
 ├── task-orchestrator-plan.md
 ├── web-frontend-developer-plan.md
 ├── playwright-e2e-test-plan.md
@@ -78,11 +83,6 @@ The scaffolding tool places all frontend source code **directly** under `/artifa
 ├── multimodal-vision-test-plan.md
 ├── multimodal-vision-test-report.md
 └── final-validation-report.md
-```
-
-```
-/artifacts/tests/e2e/ ← Playwright test files only
-/artifacts/screenshots/ ← visual audit screenshots
 ```
 
 
@@ -99,7 +99,7 @@ The scaffolding tool places all frontend source code **directly** under `/artifa
 - Must declare all file paths using the `/artifacts/` root (no subfolder).
 
 ### Web Developer
-- **Always** call `scaffold_frontend_project` first.
+- **Always** call `scaffold_frontend_project` first. **DO NOT** create files manually.
 - Verify `package.json` exists at `/artifacts/package.json` before writing any `src/` file.
 - All component files → `/artifacts/src/components/*.tsx`
 - All hooks → `/artifacts/src/hooks/use*.ts`
